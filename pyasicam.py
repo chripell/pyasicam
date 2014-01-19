@@ -2,6 +2,7 @@
 import numpy as np
 import os
 import ctypes
+import __builtin__
 
 _c = dict(
     gain = 0,
@@ -150,13 +151,16 @@ lib.getImageData.argtypes = [np.ctypeslib.ndpointer(dtype=np.uint8, ndim=1, flag
 lib.pulseGuide.restype = None
 lib.pulseGuide.argtypes = [ctypes.c_int, ctypes.c_int]
 
+_camn = 0
+
 def open(i):
     if not lib.openCamera(i):
         return False
     if not lib.initCamera(i):
         lib.closeCamera()
         return False
-    global is_color, pixel_size, bayer, controls, maxWH, im_types
+    global is_color, pixel_size, bayer, controls, maxWH, im_types, _camn
+    _camn = i
     is_color = lib.isColorCam()
     pixel_size = lib.getPixelSize()
     bayer = _bayer_pattern[lib.getColorBayer()]
@@ -171,6 +175,7 @@ def open(i):
     for i in (0,1,2,3):
         if lib.isBinSupported(i):
             bins.append(i)
+    load()
     return True
 
 def name(i):
@@ -255,3 +260,23 @@ def image(waitms = 1000):
 
 def pulse(d, t_ms):
     lib.pulseGuide(_pulse[d], t_ms)
+
+def load(i = False):
+    global _width, _height, _bin, _typ
+    home = os.path.expanduser("~")
+    if not i:
+        i = _camn
+    try:
+        with __builtin__.open(home + "/.ASICamera%d"%(i)) as f:
+            sx, sy = [int(x) for x in f.readline().split()]
+            _width, _height = [int(x) for x in f.readline().split()]
+            fx, fy = [int(x) for x in f.readline().split()]
+            _typ, _bin = [int(x) for x in f.readline().split()]
+            lib.setImageFormat(_width, _height, _bin, _typ)
+            lib.setStartPos(sx,sy)
+            lib.SetMisc(fx != 0, fy != 0)
+            for c in xrange(0,7):
+                v, a = [int(x) for x in f.readline().split()]
+                lib.setValue(c, v, a)
+    except IOError:
+        pass
