@@ -246,7 +246,7 @@ def start():
 def stop():
     lib.stopCapture()
 
-def image(waitms = 1000):
+def image(waitms = -1):
     t = _width * _height * _im_Bpp[_typ]
     x = np.require(np.zeros(t), np.uint8, requires)
     r = lib.getImageData(x, t, waitms)
