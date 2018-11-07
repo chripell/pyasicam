@@ -1,1 +1,1 @@
-Python FFI interface to ASICam.so
+Python FFI interface to ASICam2.so
