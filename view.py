@@ -1,8 +1,10 @@
 #!/usr/bin/python3
 
+import datetime
 import os
 import pyasicam as pc
 import sys
+import numpy as np
 
 import gi
 gi.require_version('Gtk', '3.0')
@@ -14,6 +16,8 @@ class Camera(pc.Camera):
     def __init__(self, i):
         super().__init__(i)
         self.mean = 1
+        self.im_num = 0
+        self.im_mean = None
         self.done = 0
         self.OpenCamera()
         self.InitCamera()
@@ -39,8 +43,17 @@ class Camera(pc.Camera):
         if self.GetExpStatus() == pc.EXP_WORKING:
             return None
         img = self.GetDataAfterExp()
+        self.capture()
         if self.mean <= 1:
             return img
+        self.im_num += 1
+        if self.im_num == 1:
+            self.im_mean = img.astype(np.float)
+        else:
+            self.im_mean += img
+        if self.im_num >= self.mean:
+            self.im_num = 0
+            return self.im_mean / self.mean
 
     def set_exposure_ms(self, ms):
         self.SetControlValue(pc.EXPOSURE, int(ms*1000), False)
@@ -53,6 +66,73 @@ class Camera(pc.Camera):
 
     def get_gain(self):
         return self.GetControlValue(pc.GAIN)[0]
+
+
+class Histo:
+
+    def __init__(self):
+        self.data = None
+        self.stretch = 0
+        self.stretch_from = 0
+        self.stretch_to = 255
+        self.bins = [2*i - 0.5 for i in range(129)]
+
+    def get(self):
+        self.histo = Gtk.DrawingArea()
+        self.histo.connect("draw", self.draw)
+        self.histo.set_property("height-request", 100)
+        self.histo.set_property("width-request", 128)
+        return self.histo
+
+    def draw(self, w, cr):
+        if self.data is None:
+            return
+        width = w.get_allocated_width()
+        height = w.get_allocated_height()
+        cr.set_source_rgb(0.7, 0.1, 0.1)
+        cr.move_to(0, 0)
+        cr.line_to(width, 0)
+        cr.line_to(width, height)
+        cr.line_to(0, height)
+        cr.line_to(0, 0)
+        cr.stroke()
+        if self.stretch_from >= 0:
+            cr.set_source_rgb(0.9, 0.6, 0.6)
+            cr.rectangle(self.stretch_from, 0,
+                         self.stretch_to - self.stretch_from, height)
+            cr.fill()
+        cr.set_source_rgb(0.1, 0.1, 0.1)
+        xscale = width / 127.0
+        yscale = float(height) / np.max(self.data)
+        cr.new_path()
+        cr.move_to(0, height - 0)
+        cr.line_to(0, height - self.data[0] * yscale)
+        for i in range(1, 128):
+            cr.line_to(i * xscale, height - self.data[i] * yscale)
+        cr.line_to(width, height - 0)
+        cr.close_path()
+        cr.fill()
+
+    def apply(self, im):
+        size = im.shape[0]
+        if im.shape[1] > size:
+            size = im.shape[1]
+        n = 1
+        while size > 256:
+            size /= 2
+            n *= 2
+        self.data = np.histogram(im[::n, ::n], bins=self.bins)[0]
+        if self.stretch > 0 and self.stretch < 100:
+            csum = self.data.cumsum()
+            perc = np.percentile(csum, np.array([self.stretch, 100-self.stretch]))
+            self.stretch_from = int(perc[0])
+            self.stretch_to = int(perc[1])
+            print("DELME", self.stretch_from, self.stretch_to)
+        else:
+            self.stretch_from = 0
+            self.stretch_to = 255
+        self.histo.queue_draw()
+        return im
 
 
 class Mainwindow(Gtk.Window):
@@ -82,8 +162,11 @@ class Mainwindow(Gtk.Window):
     def get_image(self):
         im = self.cam.get_image()
         if im is not None:
+            im = self.histo.apply(im)
+            if im.dtype != np.uint8:
+                im = im.astype(np.uint8)
             self.publish_image(im)
-            self.cam.capture()
+            print("DELME:",datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         self.periodic = GLib.timeout_add(100, self.get_image)
 
     def publish_image(self, im):
@@ -119,6 +202,8 @@ class Mainwindow(Gtk.Window):
         return box
 
     def add_controls(self, box):
+        self.histo = Histo()
+        box.pack_start(self.histo.get(), False, False, 0)
         exp_ms = self.create_text_control(
             "Exposure (ms):",
             "%.2f" % self.cam.get_exposure_ms(),
@@ -129,6 +214,16 @@ class Mainwindow(Gtk.Window):
             "%d" % self.cam.get_gain(),
             self.set_gain)
         box.pack_start(gain, False, False, 0)
+        mean = self.create_text_control(
+            "Mean:",
+            "%d" % self.cam.mean,
+            self.set_mean)
+        box.pack_start(mean, False, False, 0)
+        stretch = self.create_text_control(
+            "Stretch:",
+            "%d" % self.histo.stretch,
+            self.set_stretch)
+        box.pack_start(stretch, False, False, 0)
 
     def set_exposure_ms(self, e):
         try:
@@ -143,6 +238,20 @@ class Mainwindow(Gtk.Window):
         except:
             pass
         e.set_text("%d" % self.cam.get_gain())
+
+    def set_mean(self, e):
+        try:
+            self.cam.mean = int(e.get_text())
+        except:
+            pass
+        e.set_text("%d" % self.cam.mean)
+
+    def set_stretch(self, e):
+        try:
+            self.histo.stretch = int(e.get_text())
+        except:
+            pass
+        e.set_text("%d" % self.histo.stretch)
 
 
 if len(sys.argv) < 2:
