@@ -74,14 +74,13 @@ class Histo:
         self.data = None
         self.stretch = 0
         self.stretch_from = 0
-        self.stretch_to = 255
+        self.stretch_to = 127
         self.bins = [2*i - 0.5 for i in range(129)]
 
     def get(self):
         self.histo = Gtk.DrawingArea()
         self.histo.connect("draw", self.draw)
         self.histo.set_property("height-request", 100)
-        self.histo.set_property("width-request", 128)
         return self.histo
 
     def draw(self, w, cr):
@@ -96,14 +95,15 @@ class Histo:
         cr.line_to(0, height)
         cr.line_to(0, 0)
         cr.stroke()
-        if self.stretch_from >= 0:
-            cr.set_source_rgb(0.9, 0.6, 0.6)
-            cr.rectangle(self.stretch_from, 0,
-                         self.stretch_to - self.stretch_from, height)
-            cr.fill()
-        cr.set_source_rgb(0.1, 0.1, 0.1)
         xscale = width / 127.0
         yscale = float(height) / np.max(self.data)
+        if self.stretch_from >= 0:
+            cr.set_source_rgb(0.9, 0.6, 0.6)
+            cr.rectangle(self.stretch_from * xscale, 0,
+                         (self.stretch_to - self.stretch_from) * xscale,
+                         height)
+            cr.fill()
+        cr.set_source_rgb(0.1, 0.1, 0.1)
         cr.new_path()
         cr.move_to(0, height - 0)
         cr.line_to(0, height - self.data[0] * yscale)
@@ -123,14 +123,16 @@ class Histo:
             n *= 2
         self.data = np.histogram(im[::n, ::n], bins=self.bins)[0]
         if self.stretch > 0 and self.stretch < 100:
-            csum = self.data.cumsum()
-            perc = np.percentile(csum, np.array([self.stretch, 100-self.stretch]))
-            self.stretch_from = int(perc[0])
-            self.stretch_to = int(perc[1])
-            print("DELME", self.stretch_from, self.stretch_to)
+            cs = np.cumsum(self.data)/np.sum(self.data) * 100
+            self.stretch_from = len(cs[cs <= self.stretch])
+            self.stretch_to = len(cs[cs <= 100 - self.stretch])
+            s_to = self.stretch_to / 127.0 * 255.0
+            s_from = self.stretch_from / 127.0 * 255.0
+            scale = 255.0 / (s_to - s_from)
+            im = np.clip((im - s_from) * scale, 0, 255)
         else:
             self.stretch_from = 0
-            self.stretch_to = 255
+            self.stretch_to = 127
         self.histo.queue_draw()
         return im
 
@@ -166,7 +168,6 @@ class Mainwindow(Gtk.Window):
             if im.dtype != np.uint8:
                 im = im.astype(np.uint8)
             self.publish_image(im)
-            print("DELME:",datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         self.periodic = GLib.timeout_add(100, self.get_image)
 
     def publish_image(self, im):
