@@ -11,6 +11,14 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GdkPixbuf, GLib, Gdk, Gio, GObject
 
 
+def gamma_stretch(im, gamma):
+    if im.dtype != np.float:
+        im = im.astype(np.float)
+    im /= 255.0
+    im = im ** gamma
+    return im * 255.0
+
+
 class Camera(pc.Camera):
 
     def __init__(self, i):
@@ -145,6 +153,7 @@ class Mainwindow(Gtk.Window):
             title="PYASICAM", *args, **kwargs)
         self.cam = cam
         self.pix = None
+        self.gamma = 1.0
         cam.capture()
         scrolledImage = Gtk.ScrolledWindow()
         self.image = Gtk.DrawingArea()
@@ -165,6 +174,8 @@ class Mainwindow(Gtk.Window):
         im = self.cam.get_image()
         if im is not None:
             im = self.histo.apply(im)
+            if self.gamma != 1.0:
+                im = gamma_stretch(im, self.gamma)
             if im.dtype != np.uint8:
                 im = im.astype(np.uint8)
             self.publish_image(im)
@@ -225,6 +236,11 @@ class Mainwindow(Gtk.Window):
             "%d" % self.histo.stretch,
             self.set_stretch)
         box.pack_start(stretch, False, False, 0)
+        gamma = self.create_text_control(
+            "Gamma:",
+            "%d" % self.gamma,
+            self.set_gamma)
+        box.pack_start(gamma, False, False, 0)
 
     def set_exposure_ms(self, e):
         try:
@@ -253,6 +269,13 @@ class Mainwindow(Gtk.Window):
         except:
             pass
         e.set_text("%d" % self.histo.stretch)
+
+    def set_gamma(self, e):
+        try:
+            self.gamma = float(e.get_text())
+        except:
+            pass
+        e.set_text("%f" % self.gamma)
 
 
 if len(sys.argv) < 2:
