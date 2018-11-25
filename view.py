@@ -5,6 +5,7 @@ import os
 import pyasicam as pc
 import sys
 import numpy as np
+import cairo
 
 import gi
 gi.require_version('Gtk', '3.0')
@@ -152,7 +153,7 @@ class Mainwindow(Gtk.Window):
             self, default_width=800, default_height=600,
             title="PYASICAM", *args, **kwargs)
         self.cam = cam
-        self.pix = None
+        self.surface = None
         self.gamma = 1.0
         cam.capture()
         scrolledImage = Gtk.ScrolledWindow()
@@ -170,34 +171,36 @@ class Mainwindow(Gtk.Window):
         self.periodic = GLib.timeout_add(100, self.get_image)
         self.show_all()
 
+    def process_image(self, im):
+        im = self.histo.apply(im)
+        if self.gamma != 1.0:
+            im = gamma_stretch(im, self.gamma)
+        self.publish_image(im)
+
     def get_image(self):
         im = self.cam.get_image()
         if im is not None:
-            im = self.histo.apply(im)
-            if self.gamma != 1.0:
-                im = gamma_stretch(im, self.gamma)
-            if im.dtype != np.uint8:
-                im = im.astype(np.uint8)
-            self.publish_image(im)
+            self.im = im
+            self.process_image(im)
         self.periodic = GLib.timeout_add(100, self.get_image)
 
     def publish_image(self, im):
-        loader = GdkPixbuf.PixbufLoader.new_with_type('pnm')
-        loader.write(b'P5\n%d %d\n255\n' % (im.shape[1], im.shape[0]))
-        loader.write(im.tobytes())
-        loader.close()
-        self.pix = loader.get_pixbuf()
+        if im.dtype != np.uint8:
+            im = im.astype(np.uint8)
+        im32 = np.dstack((im, im, im, im))
+        self.surface = cairo.ImageSurface.create_for_data(
+            im32, cairo.FORMAT_RGB24, im.shape[1], im.shape[0])
         self.image.set_size_request(im.shape[1], im.shape[0])
         self.image.queue_draw()
 
     def draw(self, w, cr):
-        if not self.pix:
+        if not self.surface:
             return
-        Gdk.cairo_set_source_pixbuf(cr, self.pix, 0, 0)
+        cr.set_source_surface(self.surface, 0, 0)
         cr.paint()
 
     def configure(self, w, ev):
-        if not self.pix:
+        if not self.surface:
             return
         self.image.queue_draw()
 
