@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python
 
 import sys
 import focuser
@@ -18,8 +18,9 @@ def out1(fname, par, focuser, im8):
     cr.set_source_rgb(1.0, 1.0, 1.0)
     cr.set_font_size(30)
     cr.move_to(10, 50)
-    cr.show_text("%s n: %d %.2f/%.2f/%.2f(%.2f)" % (
-        par, focuser.num(), v.mean, v.p90, v.top, v.std))
+    cr.show_text("%s n: %d %.2f/%.2f:%.2f:%.2f/%.2f(%.2f)" % (
+        par, focuser.num(),
+        v.bot, v.p10, v.mean, v.p90, v.top, v.std))
     surface.write_to_png(fname + ("_%s.png" % par))
 
 
@@ -34,6 +35,6 @@ if focuser.num() == 0:
 while im.max() >= 256:
     im = im / 256
 im = im.astype(np.uint8)
-for p in ("sharpness", "roundness1", "roundness2"):
+for p in focuser.odata:
     out1(os.path.splitext(fname)[0],
          p, focuser, im)
